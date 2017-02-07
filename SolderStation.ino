@@ -69,6 +69,7 @@
 
 #ifdef HAVE_VOLT
  #define VCCpin A6  //Voltage divider pin for Vin
+ volatile double v_in;
 #endif
 
 #define tft_bl   7  // TFT Backlight
@@ -113,10 +114,12 @@ unsigned long StbyMillis = 0;
 unsigned long CurMillis;
 //double vcc_last=0;
 bool is_error = false;
+volatile double vcc;
+volatile bool volt_changed = true;
 
 void timerIsr()
 {
-  show_voltage();
+  read_voltage(); //read analog pin(s)
 }
 
 void setup(void) {
@@ -142,9 +145,6 @@ void setup(void) {
    Serial.println(FAN_PIN);
  #endif
 #endif
-
-  Timer1.initialize(); // 1000000 = 1sec
-  Timer1.attachInterrupt(timerIsr, 1000000); // every 1 sec.
 
 
 #ifdef HAVE_LED
@@ -185,11 +185,11 @@ void setup(void) {
 	tft.setTextColor(ST7735_YELLOW);
 	tft.setCursor(40,50);
 	tft.print("AVR");
-  tft.setCursor(40,60);
+   tft.setCursor(40,60);
 	tft.print("Soldering");
-  tft.setCursor(40,70);
+   tft.setCursor(40,70);
 	tft.print("Station");
-  tft.setCursor(40,80);
+   tft.setCursor(40,80);
   tft.print("V");
 	tft.print(VERSION);
 	
@@ -234,6 +234,9 @@ void setup(void) {
   tft.print("O");
   tft.setCursor(119,104);
   tft.print("O");
+
+  Timer1.initialize(1000000); // 1000000 = 1sec
+  Timer1.attachInterrupt(timerIsr); 
 
 /*
   
@@ -355,7 +358,6 @@ int soll_temp_tmp;
   }
 
 	analogWrite(PWMpin, pwm);
-	//digitalWrite(PWMpin, LOW);
 
   writeHEATING(soll_temp, actual_temperature, pwm);
 	
@@ -363,6 +365,9 @@ int soll_temp_tmp;
 	//update LED
 	FastLED.show();
 #endif
+
+
+  if (volt_changed) print_voltage();
 
 /*
 // show voltages
@@ -480,7 +485,7 @@ void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
 	}
 }
 
-// clear tft chars only when changed
+// clear tft numbers only when changed
 void tft_erase(int oldval, int newval, int x, int y) {
   int16_t  x1, y1;
   uint16_t w, h;
@@ -490,7 +495,7 @@ void tft_erase(int oldval, int newval, int x, int y) {
     itoa(oldval,buf,10);
     //Serial.println(buf);
     tft.getTextBounds(buf, x, y, &x1, &y1, &w, &h);
-    tft.fillRect(x1,y1,70,h,ST7735_BLACK);
+    tft.fillRect(x1,y1,71,h,ST7735_BLACK);
   }
   
   //tft.setTextColor(ST7735_BLACK);
@@ -515,6 +520,7 @@ void tft_erase(int oldval, int newval, int x, int y) {
 */  
 }
 
+// print formatted numbers on tft 
 void tft_print(int val, int x, int y) {
   int16_t  x1, y1;
   uint16_t w, h;
@@ -527,6 +533,7 @@ void tft_print(int val, int x, int y) {
     tft.print(val);
 }
 
+// display error/alert icon with short message
 void tft_message(char* msg, bool dowrite) {
   //tft.fillRect(10,60,108,40,ST7735_RED);
   if (dowrite) {
@@ -544,7 +551,7 @@ void tft_message(char* msg, bool dowrite) {
 // draw horizonal bar for PWM value
 void drawPWMBar (int nPer){
   if(nPer < LastPercent){
-    // nur Differenz löschen
+    // erase only diff bar
     tft.fillRect(20 + nPer , PIXELS_Y - BARHEIGHT - 2 , LastPercent - nPer, BARHEIGHT, ST7735_BLACK); //x,y,width,height,color
   }
   else{
@@ -553,11 +560,6 @@ void drawPWMBar (int nPer){
   LastPercent = nPer;  
 }
 
-/*
-uint16_t Color565(uint8_t r, uint8_t g, uint8_t b) {
-	return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-}
-*/
 void setPwmFrequency(int pin, int divisor) {
 	byte mode;
 	if(pin == 5 || pin == 6 || pin == 9 || pin == 10) {
@@ -626,13 +628,10 @@ double readVcc() {
   return result/1000.0; // Vcc in volts
 }
 
-void show_voltage() {
-double vcc;
-  vcc = readVcc();
-//#ifdef DEBUG
-//  Serial.print(F("Vcc2: "));
-//  Serial.println(vcc,1);
-//#endif
+void print_voltage() {
+  //double vcc;
+  //vcc = readVcc();
+  volt_changed = false;
   tft.setTextSize(1);
   tft.setTextColor(ST7735_BLACK,VOLTCOLOR);
   tft.setCursor(30,1);
@@ -641,10 +640,9 @@ double vcc;
   tft.print(vcc,1);
   tft.print("V");
 
-// needs additional R-divider for Vin
 #ifdef HAVE_VOLT
-double v_in;
-  v_in = measureVoltage(); 
+  //double v_in;
+  //v_in = measureVoltage(); 
   tft.setCursor(77,1);
   tft.print("Vin ");
   tft.setCursor(96,1);
@@ -653,21 +651,16 @@ double v_in;
 #endif
 }
 
-/*
-  int sensorValue = analogRead(A0);
-  // Convert the analog reading (which goes from 0 - 1023) to a voltage (0 - 5V):
-  float voltage = sensorValue * (5.0 / 1023.0);
- */
+// ISR 
+void read_voltage() {
+  double last_val1 = vcc;
+  vcc = readVcc();
+  volt_changed = (last_val1 != vcc);
+#ifdef HAVE_VOLT
+  double last_val2 = v_in;
+  v_in = measureVoltage();
+  volt_changed = volt_changed || (last_val2 != v_in);
+#endif
+}
 
-/*
- * 5.0 => readVcc
-unsigned int ADCValue;
-double Voltage;
-double Vcc;
-
-Vcc = readVcc()/1000.0;
-ADCValue = analogRead(0);
-Voltage = (ADCValue / 1024.0) * Vcc;  
-
-*/
 
