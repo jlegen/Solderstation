@@ -9,6 +9,10 @@
 // - measure Vcc and Vin
 //*******************************//
 
+// tested on Arduino Pro mini with standard boot loader
+// external libraries used are all available by using the IDE library mananger:
+// TimerOne, FastLED, Adafruit_GFX, Adafruit_ST7735
+
 // more Ideas:
 // - replace pot by rotary encoder 
 // - enter menu with long click: show 3-4 temp. presets, shutdown temp, shutdown time
@@ -22,14 +26,14 @@
 #include <TimerOne.h>
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library
-#define BIGFONT FreeSans18pt7b
-//#include <Fonts/FreeSansBold18pt7b.h>
-#include <Fonts/FreeSans18pt7b.h>
+#define BIGFONT FreeSansBold18pt7b
+#include <Fonts/FreeSansBold18pt7b.h>
+//#define BIGFONT FreeSans18pt7b
+//#include <Fonts/FreeSans18pt7b.h>
 
 #include "icons.h"
 #include "stationLOGO.h"
 #define ST7735_GREY 0x632C
-#define VOLTCOLOR tft.Color565(230,230,0)
 #define BARCOLOR ST7735_MAGENTA
 #define BARHEIGHT 9
 #define PIXELS_X 128
@@ -39,11 +43,11 @@
 #define SCALE_X (PIXELS_X/128)
 #define SCALE_Y (PIXELS_Y/160)
 
-#define VERSION "1.7"    // Version der Steuerung
+#define VERSION "1.7"
 
 // comment in/out to (de)activate
 #define INTRO
-#define DEBUG
+//#define DEBUG
 #define HAVE_LED  // control a WS2812 RGB LED 
 #define HAVE_FAN  // fan connected to FAN_PIN
 #define HAVE_VOLT // measure Vin - needs voltage divider Vin<-22k->analog pin<-5.6k->GND (max. 25V with this config)
@@ -64,7 +68,7 @@
 #endif
 
 #ifdef HAVE_FAN  
- #define FAN_PIN A0   // Pin of fan
+ #define FAN_PIN A0   // Pin of fume fan
 #endif
 
 #ifdef HAVE_VOLT
@@ -171,7 +175,7 @@ void setup(void) {
 	setPwmFrequency(PWMpin, PWM_DIV);
 	digitalWrite(PWMpin, LOW);
 	
-  SPI.setClockDivider(SPI_CLOCK_DIV4);  // 4MHz
+  SPI.setClockDivider(SPI_CLOCK_DIV2);  // 8MHz
 
   tft.initR(INITR_BLACKTAB);
 	tft.setRotation(0);	// 0 - Portrait, 1 - Landscape
@@ -230,9 +234,9 @@ void setup(void) {
   tft.print("PWM");
 
   
-  tft.setCursor(119,57);
+  tft.setCursor(122,57);
   tft.print("O");
-  tft.setCursor(119,104);
+  tft.setCursor(122,103);
   tft.print("O");
 
   Timer1.initialize(1000000); // 1000000 = 1sec
@@ -328,7 +332,7 @@ int soll_temp_tmp;
 #endif
 
 	int diff = (soll_temp_tmp + OVER_SHOT)- actual_temperature;
-	pwm = diff*CNTRL_GAIN;
+	pwm = diff * CNTRL_GAIN;
 
 #ifdef DEBUG
   Serial.print(F("diff: "));
@@ -366,39 +370,9 @@ int soll_temp_tmp;
 	FastLED.show();
 #endif
 
-
   if (volt_changed) print_voltage();
 
-/*
-// show voltages
-if ((CurMillis % READ_INTVAL) <= 100) {
-  vcc = readVcc();
-#ifdef DEBUG
-  Serial.print(F("Vcc2: "));
-  Serial.println(vcc,1);
-#endif
-  tft.setTextSize(1);
-  tft.setTextColor(ST7735_BLACK,VOLTCOLOR);
-  tft.setCursor(30,1);
-  tft.print("Vcc ");
-  tft.setCursor(50,1);
-  tft.print(vcc,1);
-  tft.print("V");
-//  vcc_last = vcc;
-
-// needs additional R-divider for Vin
-#ifdef HAVE_VOLT
-  measureVoltage(); 
-  tft.setCursor(77,1);
-  tft.print("Vin ");
-  tft.setCursor(96,1);
-  tft.print(v_in,1);
-  tft.print("V");
-#endif
-}
-*/
-
-	delay(DELAY_MAIN_LOOP);		//wait for some time
+	//delay(DELAY_MAIN_LOOP);		//wait for some time
 }
 
 
@@ -470,16 +444,19 @@ void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
     tft_print(tempSOLL, 65, 135);
 		tempSOLL_OLD = tempSOLL;
 	}
-	
+
+	tft.setFont();
 	if (pwmVAL_OLD != pwmVAL){
-    tft.setFont();
     tft.setTextSize(2);
 		//tft.setCursor(79,144);
     tft_erase(pwmVAL_OLD, pwmVAL,79,144);
     drawPWMBar(pwmVAL);
-//    tft.setCursor(79,144);
+    tft.setCursor(79,144);
     tft.setTextColor(ST7735_WHITE); 
-    tft_print(pwmVAL, 79, 144);
+    //tft_print(pwmVAL, 79, 144);
+    const char * blanks = pwmVAL < 10 ? "  " : ((pwmVAL < 100) ? " " : "");
+    tft.print(blanks);
+    tft.print(pwmVAL);
     tft.print("%");
 		pwmVAL_OLD = pwmVAL;
 	}
@@ -522,14 +499,9 @@ void tft_erase(int oldval, int newval, int x, int y) {
 
 // print formatted numbers on tft 
 void tft_print(int val, int x, int y) {
-  int16_t  x1, y1;
-  uint16_t w, h;
-  char buf[3];
-    itoa(val,buf,10);
-    tft.getTextBounds(buf, x, y, &x1, &y1, &w, &h);
     tft.setCursor(x,y);
-    if (val < 100) tft.print(" ");
-    if (val <  10) tft.print(" ");
+    if (val < 100) tft.print("  ");
+    if (val <  10) tft.print("  ");
     tft.print(val);
 }
 
@@ -597,9 +569,8 @@ void setPwmFrequency(int pin, int divisor) {
 double measureVoltage(void) {
 unsigned int ADCValue;
   analogRead(VCCpin);
-  //v_in = v_in*.9+(analogRead(VCCpin)*25/1024.0)*.1; //maximum measurable is ~24.5V
   ADCValue = analogRead(VCCpin);
-  //v_in = (ADCValue / 1024.0) * vcc_last;  
+  //v_in = v_in*.9+(analogRead(VCCpin)*25/1024.0)*.1; //maximum measurable is ~24.5V
   return ADCValue * (25 / 1023.0); // range: max. 25V
 }
 #endif
@@ -615,8 +586,8 @@ double readVcc() {
     ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
   #endif  
  
-  delay(2); // Wait for Vref to settle
-  ADCSRA |= _BV(ADSC); // Start conversion
+  delay(2);                        // Wait for Vref to settle
+  ADCSRA |= _BV(ADSC);             // Start conversion
   while (bit_is_set(ADCSRA,ADSC)); // measuring
  
   uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH  
@@ -625,7 +596,7 @@ double readVcc() {
   long result = (high<<8) | low;
  
   result = 1125300L / result; // Calculate Vcc (in mV); 1125300 = 1.1*1023*1000
-  return result/1000.0; // Vcc in volts
+  return result/1000.0;       // Vcc in volts
 }
 
 void print_voltage() {
@@ -633,21 +604,35 @@ void print_voltage() {
   //vcc = readVcc();
   volt_changed = false;
   tft.setTextSize(1);
-  tft.setTextColor(ST7735_BLACK,VOLTCOLOR);
+  tft.fillRect(50,1,18,8,ST7735_BLACK);
+  tft.setTextColor(ST7735_MAGENTA);
   tft.setCursor(30,1);
   tft.print("Vcc ");
+  //tft.setCursor(49,1);
+  //tft.print("   ");
   tft.setCursor(50,1);
   tft.print(vcc,1);
   tft.print("V");
+  #ifdef DEBUG
+    Serial.print(F("*********************** Vcc printed: "));
+    Serial.println(vcc,2);
+  #endif
 
 #ifdef HAVE_VOLT
   //double v_in;
   //v_in = measureVoltage(); 
-  tft.setCursor(77,1);
+  tft.fillRect(97,1,24,8,ST7735_BLACK);
+  //tft.setCursor(78,1);
+  //tft.print("   ");
+  tft.setCursor(78,1);
   tft.print("Vin ");
-  tft.setCursor(96,1);
+  tft.setCursor(97,1);
   tft.print(v_in,1);
   tft.print("V");
+  #ifdef DEBUG
+    Serial.print(F("*********************** Vin printed: "));
+    Serial.println(v_in,2);
+  #endif
 #endif
 }
 
