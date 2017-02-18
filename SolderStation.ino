@@ -117,9 +117,8 @@ int val_poti = 0;
 int LastPercent = 0;
 unsigned long StbyMillis = 0;
 unsigned long CurMillis;
-//double vcc_last=0;
 bool is_error = false;
-volatile double vcc;
+volatile double vcc = 0.0;
 volatile bool volt_changed = true;
 
 void timerIsr()
@@ -237,11 +236,11 @@ void setup(void) {
 
   
   //tft.setFont();
-  tft.setCursor(122,57);
+  tft.setCursor(122,58);
   tft.print("O");
-  tft.setCursor(122,103);
+  tft.setCursor(122,104);
   tft.print("O");
-  tft.setCursor(122,137);
+  tft.setCursor(122,145);
   tft.print("%");
 
   Timer1.initialize(1000000); // 1000000 = 1sec
@@ -356,7 +355,7 @@ int soll_temp_tmp;
 	pwm = pwm > MAX_PWM ? pwm = MAX_PWM : pwm < 0 ? pwm = 0 : pwm;
 	
   // tip removed?
-	if (actual_temperature > 550){
+	if (actual_temperature > 540){
 		pwm = 0;
 		actual_temperature = 0;
     if (!is_error) tft_message("Tip!", true);
@@ -433,12 +432,12 @@ void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
         #endif
       break;
     }
-		tft_print(tempVAL_OLD, tempVAL, 65, 90, col);
+		tft_print(tempVAL_OLD, tempVAL, 60, 90, col);
 		tempVAL_OLD = tempVAL;
 	}
 	
 	if ((tempSOLL_OLD+d_tempSOLL < tempSOLL) || (tempSOLL_OLD-d_tempSOLL > tempSOLL)){
-    tft_print(tempSOLL_OLD, tempSOLL, 65, 135, ST7735_WHITE);
+    tft_print(tempSOLL_OLD, tempSOLL, 60, 135, ST7735_WHITE);
 		tempSOLL_OLD = tempSOLL;
 	}
 
@@ -454,7 +453,7 @@ void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
    
     //tft.setFont(&FreeSansBold9pt7b);
     tft.setFont(&MEDFONT);
-    tft_print(pwmVAL_OLD, pwmVAL, 70, 156, ST7735_WHITE);
+    tft_print(pwmVAL_OLD, pwmVAL, 60, 156, ST7735_WHITE);
 
 		pwmVAL_OLD = pwmVAL;
 	}
@@ -470,12 +469,12 @@ void tft_print(int oldval, int newval, int x, int y, uint16_t col) {
   if (oldval != newval) {
     itoa(oldval,buf,10);
     tft.getTextBounds(buf, x, y, &x1, &y1, &w, &h);
-    tft.fillRect(120-w,y1,w+3,h,BACKGROUND);
+    tft.fillRect(119-w,y1,w+3,h,BACKGROUND);
   }
 
   itoa(newval,buf,10);
   tft.getTextBounds(buf, x, y, &x1, &y1, &w, &h);
-  tft.setCursor(120-w,y);
+  tft.setCursor(119-w,y);
   tft.setTextColor(col);
   tft.print(newval);
   
@@ -509,8 +508,6 @@ void tft_message(char* msg, bool dowrite) {
 
 // draw horizonal bar for PWM value
 void drawPWMBar (int nPer){
-
-  //nPer = map(nPer, 0, 82, 0, 70);
   if(nPer < LastPercent){
     // erase only diff bar
     tft.fillRect(20 + nPer , PIXELS_Y - BARHEIGHT - 2 , LastPercent - nPer, BARHEIGHT, BACKGROUND); //x,y,width,height,color
