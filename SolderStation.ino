@@ -23,7 +23,6 @@
 
 #define __PROG_TYPES_COMPAT__ 
 #include <SPI.h>
-#include <TimerOne.h>
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library
 #define BIGFONT FreeSansBold18pt7b
@@ -74,7 +73,8 @@
 
 #ifdef HAVE_VOLT
  #define VCCpin A6  //Voltage divider pin for Vin
- volatile double v_in;
+// volatile double v_in;
+ double v_in = 0.0;
 #endif
 
 #define tft_bl   7  // TFT Backlight
@@ -118,13 +118,7 @@ int LastPercent = 0;
 unsigned long StbyMillis = 0;
 unsigned long CurMillis;
 bool is_error = false;
-volatile double vcc = 0.0;
-volatile bool volt_changed = true;
-
-void timerIsr()
-{
-  read_voltage(); //read analog pin(s)
-}
+double vcc = 0.0;
 
 void setup(void) {
 #ifdef DEBUG
@@ -243,8 +237,8 @@ void setup(void) {
   tft.setCursor(122,145);
   tft.print("%");
 
-  Timer1.initialize(1000000); // 1000000 = 1sec
-  Timer1.attachInterrupt(timerIsr); 
+  //Timer1.initialize(1000000); // 1000000 = 1sec
+  //Timer1.attachInterrupt(timerIsr); 
 
 /*
   
@@ -374,7 +368,10 @@ int soll_temp_tmp;
 	FastLED.show();
 #endif
 
-  if (volt_changed) print_voltage();
+  if ((CurMillis % READ_INTVAL) < 50) {
+    if (read_voltage()) print_voltage();
+  }
+  //if (volt_changed) print_voltage();
 
 	delay(DELAY_MAIN_LOOP);		//wait for some time
 }
@@ -586,7 +583,6 @@ double readVcc() {
 }
 
 void print_voltage() {
-  volt_changed = false;
   tft.setTextSize(1);
   tft.fillRect(50,1,18,8,BACKGROUND);
   tft.setTextColor(ST7735_MAGENTA);
@@ -615,8 +611,9 @@ void print_voltage() {
 }
 
 // ISR 
-void read_voltage() {
-  double last_val1 = vcc;
+bool read_voltage() {
+bool volt_changed;
+double last_val1 = vcc;
   vcc = readVcc();
   volt_changed = ((int)(last_val1*10) != (int)(vcc*10)); // only check 1 decimal
 #ifdef HAVE_VOLT
@@ -624,6 +621,7 @@ void read_voltage() {
   v_in = measureVoltage();
   volt_changed = volt_changed || ((int)(last_val2*10) != (int)(v_in*10));
 #endif
+  return volt_changed;
 }
 
 
