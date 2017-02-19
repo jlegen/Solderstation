@@ -23,6 +23,9 @@
 
 #define __PROG_TYPES_COMPAT__ 
 #include <SPI.h>
+#include <EEPROM.h>
+#include <ClickEncoder.h>
+#include <TimerOne.h>
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library
 
@@ -39,7 +42,7 @@
 #define SCALE_X (PIXELS_X/128)
 #define SCALE_Y (PIXELS_Y/160)
 
-#define VERSION "1.7"
+#define VERSION "1.8"
 
 // comment in/out to (de)activate
 #define INTRO
@@ -88,58 +91,95 @@
 #define DELAY_MEASURE 	50 // default is 50
 #define ADC_TO_TEMP_GAIN 	0.53 // mit original Weller Station verglichen
 #define ADC_TO_TEMP_OFFSET 13.0 
-#define STANDBY_TEMP	  150  // decrease to this temp. when tip is in stand
-#define SHUTDOWN_TIME 300000 // set temp to 0 after these ms in stand
+//#define STANDBY_TEMP	  150  // decrease to this temp. when tip is in stand
+//#define SHUTDOWN_TIME 300000 // set temp to 0 after these ms in stand
 #define READ_INTVAL     1000 // intervall to measure voltages
+#define EEPROM_ADDR 10  // start address for avr eeprom 
 
 #define OVER_SHOT 			2
 #define MAX_PWM_LOW			180
 #define MAX_PWM_HI			210		//254
 #define MAX_POTI				400		//400Grad C
 
+#define r_button 17                //rotary encoder pushbutton, PB1
+#define r_pha 16                   //rotary encoder phase A, PB2
+#define r_phb 15                   //rotary encoder phase B, PB3
+
 #define PWM_DIV 1024						//default: 64   31250/64 = 2ms
 
 Adafruit_ST7735 tft = Adafruit_ST7735(tft_cs, tft_dc, tft_rst);
+ClickEncoder Encoder(r_pha, r_phb, r_button, 4); // 2,3,4 = clicks per step (notches)
+
 
 // state machine: modes
 #define OP_NORMAL 0
 #define OP_STANDBY 1
 #define OP_SHUTDOWN 2
+
 int op_state = -1;
 
 int pwm = 0;             // pwm Out Val 0.. 255
-int soll_temp = 300;
-int val_poti = 0;
+int soll_temp = 260;
+//int val_poti = 0;
 int LastPercent = 0;
 unsigned long StbyMillis = 0;
 unsigned long CurMillis;
+unsigned long PrevMillis = 0;
 bool is_error = false;
 double vcc = 0.0;
+int16_t encMovement;
+int16_t encAbsolute;
+int16_t encLastAbsolute = -1;
+namespace State {  
+  typedef enum SystemMode_e {
+    None      = 0,
+    Default   = (1<<0),
+    Settings  = (1<<1),
+    Edit      = (1<<2)
+  } SystemMode;
+};
+
+uint8_t systemState = State::Default;
+uint8_t previousSystemState = State::None;
+bool updateMenu = false;
+
+// define parameter's index
+#define STANDBYTEMP 0
+#define PRESETTEMP1 1
+#define PRESETTEMP2 2
+#define PRESETTEMP3 3
+#define SHUTDOWNTIME 4
+uint16_t params[5] = {150, 250, 300, 350, 300};
+#define MAX_PRESETS 3 // how many temp. presets to store
+uint8_t act_preset = 0;
+
+void timerIsr()
+{
+  Encoder.service();
+}
+
+void write_to_eeprom(void) {
+int i;
+uint16_t eeadr = EEPROM_ADDR;
+int len = sizeof(params) / sizeof(int16_t);
+ for (i=0; i<len; i++) {
+   EEPROM.put(eeadr, params[i]);
+   eeadr += sizeof(int16_t);
+ }
+}
+
+void read_from_eeprom(void) {
+int i;
+uint16_t eeadr = EEPROM_ADDR;
+int len = sizeof(params) / sizeof(int16_t);
+ for (i=0; i<len; i++) {
+   EEPROM.get(eeadr, params[i]);
+   eeadr += sizeof(int16_t);
+ }
+}
+
 
 void setup(void) {
-#ifdef DEBUG
-  Serial.begin(56700);
-  Serial.print(F("SolderStation V "));
-  Serial.println(VERSION);
-  Serial.println(F("Parameter: "));
-  Serial.print(F("Standby Temp.: "));
-  Serial.println(STANDBY_TEMP);
-  Serial.print(F("Shutdown Time: "));
-  Serial.println(SHUTDOWN_TIME);
-  Serial.print(F("Display scale factor X: "));
-  Serial.println(SCALE_X);
-  Serial.print(F("Display scale factor Y: "));
-  Serial.println(SCALE_Y);
- #ifdef HAVE_LED
-   Serial.print(F("WS2812 LED activated Pin: "));
-   Serial.println(LED_PIN);
- #endif
- #ifdef HAVE_FAN
-   Serial.print(F("FAN activated Pin: "));
-   Serial.println(FAN_PIN);
- #endif
-#endif
-
 
 #ifdef HAVE_LED
   FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
@@ -166,6 +206,10 @@ void setup(void) {
 	digitalWrite(PWMpin, LOW);
 	
   SPI.setClockDivider(SPI_CLOCK_DIV2);  // 8MHz
+  
+  Timer1.initialize(1000);
+  Timer1.attachInterrupt(timerIsr);
+  Encoder.setAccelerationEnabled(true);
 
   tft.initR(INITR_BLACKTAB);
 	tft.setRotation(0);	// 0 - Portrait, 1 - Landscape
@@ -179,16 +223,57 @@ void setup(void) {
 	tft.setTextColor(ST7735_YELLOW);
 	tft.setCursor(40,50);
 	tft.print("AVR");
-   tft.setCursor(40,60);
+  tft.setCursor(40,60);
 	tft.print("Soldering");
-   tft.setCursor(40,70);
+  tft.setCursor(40,70);
 	tft.print("Station");
-   tft.setCursor(40,80);
+  tft.setCursor(40,80);
   tft.print("V");
 	tft.print(VERSION);
 	
   //Backlight on
   digitalWrite(tft_bl, HIGH);
+
+  ClickEncoder::Button b = Encoder.getButton();
+  uint16_t eetest;
+  EEPROM.get(EEPROM_ADDR, eetest);
+  if (eetest < 10 || eetest > 400 || (b != ClickEncoder::Open)) 
+  {
+    // write defaults to EEPROM
+    write_to_eeprom();
+  } else {
+    // load settings from EEPROM
+    read_from_eeprom();
+  } 
+
+#ifdef DEBUG
+  Serial.begin(56700);
+  Serial.print(F("SolderStation V "));
+  Serial.println(VERSION);
+  Serial.print(F("EEProm Standby Temp.: "));
+  Serial.println(params[STANDBYTEMP]);
+  Serial.print(F("EEProm Shutdown Time: "));
+  Serial.println(params[SHUTDOWNTIME]);
+  Serial.print(F("EEProm Prog Temp 1: "));
+  Serial.println(params[PRESETTEMP1]);
+  Serial.print(F("EEProm Prog Temp 2: "));
+  Serial.println(params[PRESETTEMP2]);
+  Serial.print(F("EEProm Prog Temp 3: "));
+  Serial.println(params[PRESETTEMP3]);
+  Serial.print(F("Display scale factor X: "));
+  Serial.println(SCALE_X);
+  Serial.print(F("Display scale factor Y: "));
+  Serial.println(SCALE_Y);
+ #ifdef HAVE_LED
+   Serial.print(F("WS2812 LED activated Pin: "));
+   Serial.println(LED_PIN);
+ #endif
+ #ifdef HAVE_FAN
+   Serial.print(F("FAN activated Pin: "));
+   Serial.println(FAN_PIN);
+ #endif
+#endif
+
 	delay(2000);
 #endif
 
@@ -231,27 +316,102 @@ void setup(void) {
   tft.setCursor(122,145);
   tft.print("%");
 
-
-/*
-  
-  tft.setCursor(115,47);
-  tft.print("o");
-  tft.setCursor(115,92);
-  tft.print("o");
-*/
-  //tft.setTextSize(2);
-  //tft.setCursor(90,144); //115,144
-	//tft.print("%");
 }
 
 void loop() {
 int soll_temp_tmp;
 
   CurMillis = millis();
-  int actual_temperature = getTemperature();
 
-  val_poti = analogRead(POTI);
-	soll_temp = map(val_poti, 0, 1024, 0, MAX_POTI);
+  // handle encoder
+  encMovement = Encoder.getValue();
+  if (encMovement) {
+    PrevMillis = CurMillis;  // INTERVAL time for showing data
+    encAbsolute += encMovement;
+    switch (systemState) {
+      case State::Settings:
+        //engine->navigate((encMovement > 0) ? engine->getNext() : engine->getPrev());
+        //updateMenu = true;
+        break;
+
+      // scroll through data to show
+      case State::Default:
+       if (encMovement > 0 && soll_temp < MAX_POTI) soll_temp+=encMovement;
+       if (encMovement < 0 && soll_temp >  0) soll_temp += encMovement;
+       if (soll_temp < 0) soll_temp = 0;
+       //update_screen(show_screen);
+      break;
+    }
+  }
+
+  // handle button
+  switch (Encoder.getButton()) {
+    case ClickEncoder::Clicked:
+      switch (systemState) {
+        // navigate menu structure
+        case State::Settings:
+          //engine->invoke();
+          //updateMenu = true;
+          break;
+
+        // exit show data mode
+        case State::Default:
+          if (act_preset < MAX_PRESETS) {
+            act_preset++;
+          } else {
+            act_preset = 1;
+          }
+          soll_temp = params[act_preset];
+          break;
+        
+        // save value
+        case State::Edit:
+          //DEBUG_PRINTLN(F("Save changes!"));
+          //write_to_eeprom();
+          //Encoder.setAccelerationEnabled(false);
+          //engine->navigate(&miSettings1);
+          systemState = State::Settings;
+          previousSystemState = systemState;
+          //updateMenu = true;
+          break;
+      }
+      break;
+
+    case ClickEncoder::DoubleClicked:
+      // menu: goto one level up
+      if (systemState == State::Settings) {
+        //DEBUG_PRINTLN(F("Doubleclick in Settings"));
+        //engine->navigate(engine->getParent());
+        //updateMenu = true;
+      }
+      // escaped from edit mode
+      if (systemState == State::Edit) {
+        //DEBUG_PRINTLN(F("Doubleclick in Edit"));
+        //Encoder.setAccelerationEnabled(false);
+        // Reset parameter to previous value
+        //getItemValuePointer(engine->currentItem, &iValue);
+        //*iValue = last_value;
+        systemState = State::Settings;
+        previousSystemState = systemState;
+        //engine->navigate(engine->currentItem);
+        //updateMenu = true;
+      }
+      break;
+
+    case ClickEncoder::Held:
+      // enter menu
+      if (systemState != State::Settings) {
+        //Encoder.setAccelerationEnabled(false);
+        //engine->navigate(&miSettings1);
+        systemState = State::Settings;
+        previousSystemState = systemState;
+        //updateMenu = true;
+      }
+      break;
+  }
+  
+  
+  int actual_temperature = getTemperature();
 
   if (digitalRead(STANDBYin) == true) {
     if (op_state != OP_NORMAL) {
@@ -275,7 +435,7 @@ int soll_temp_tmp;
      #endif
      StbyMillis = CurMillis; //start timer
      tft.drawBitmap(5,57,sb_icon,20,20,ST7735_GREEN);
-    } else if (op_state == OP_STANDBY && ((CurMillis - StbyMillis) >= SHUTDOWN_TIME)) {
+    } else if (op_state == OP_STANDBY && ((CurMillis - StbyMillis) >= (params[SHUTDOWNTIME]*1000))) {
      op_state = OP_SHUTDOWN;
      #ifdef HAVE_FAN
         digitalWrite(FAN_PIN, false);
@@ -293,7 +453,7 @@ int soll_temp_tmp;
       soll_temp_tmp = soll_temp;
     break;
     case OP_STANDBY:
-      soll_temp_tmp = soll_temp >= STANDBY_TEMP ? STANDBY_TEMP : soll_temp;
+      soll_temp_tmp = soll_temp >= params[STANDBYTEMP] ? params[STANDBYTEMP] : soll_temp;
     break;
     case OP_SHUTDOWN:
       soll_temp_tmp = 0;
@@ -301,17 +461,17 @@ int soll_temp_tmp;
   }
 
 #ifdef DEBUG
-  Serial.print(F("Status: "));
+  Serial.print(F("Status:    "));
   Serial.println(op_state);
-  Serial.print(F("Poti:       "));
-  Serial.println(val_poti);
-  Serial.print(F("soll_temp:  "));
+  Serial.print(F("Encoder:   "));
+  Serial.println(encAbsolute);
+  Serial.print(F("Temp Soll: "));
   Serial.println(soll_temp);
-  Serial.print(F("akt. Temp.: "));
+  Serial.print(F("Temp Akt.: "));
   Serial.println(actual_temperature);
-  Serial.print(F("soll_temp_tmp: "));
+  Serial.print(F("soll_tmp:  "));
   Serial.println(soll_temp_tmp );
-  Serial.print("Voltdisplay-Int.: ");
+  Serial.print(F("Volt INT:  "));
   Serial.println(CurMillis % READ_INTVAL);
   if (op_state == OP_STANDBY) {
     Serial.print(F("Standby time: "));
@@ -333,7 +493,7 @@ int soll_temp_tmp;
 	int MAX_PWM;
 
 	//Set max heating Power 
-	MAX_PWM = actual_temperature <= STANDBY_TEMP ? MAX_PWM_LOW : MAX_PWM_HI;
+	MAX_PWM = actual_temperature <= params[STANDBYTEMP] ? MAX_PWM_LOW : MAX_PWM_HI;
 	
 	//8 Bit Range
 	pwm = pwm > MAX_PWM ? pwm = MAX_PWM : pwm < 0 ? pwm = 0 : pwm;
@@ -466,13 +626,6 @@ void tft_print(int oldval, int newval, int x, int y, uint16_t col) {
   tft.setTextColor(col);
   tft.print(newval < 10 ? "  " : (newval < 100) ? " " : "");
   tft.print(newval);
-  
-#ifdef DEBUG
-  Serial.print(F("w: "));
-  Serial.println(w);
-  Serial.print(F("x1: "));
-  Serial.println(x1 );
-#endif  
 }
 
 // display error/alert icon with short message
