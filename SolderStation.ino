@@ -25,10 +25,6 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library
-#define BIGFONT FreeSansBold18pt7b
-#include <Fonts/FreeSansBold18pt7b.h>
-#define MEDFONT FreeSans9pt7b
-#include <Fonts/FreeSans9pt7b.h>
 
 #include "icons.h"
 #include "stationLOGO.h"
@@ -216,7 +212,6 @@ void setup(void) {
   tft.print("v");
   tft.print(VERSION);
 
-	//tft.setFont(&FreeSansBold9pt7b);
 	tft.setTextColor(ST7735_WHITE);
 
 	tft.setCursor(1,84);
@@ -229,7 +224,6 @@ void setup(void) {
   tft.print("PWM");
 
   
-  //tft.setFont();
   tft.setCursor(122,58);
   tft.print("O");
   tft.setCursor(122,104);
@@ -237,8 +231,6 @@ void setup(void) {
   tft.setCursor(122,145);
   tft.print("%");
 
-  //Timer1.initialize(1000000); // 1000000 = 1sec
-  //Timer1.attachInterrupt(timerIsr); 
 
 /*
   
@@ -254,8 +246,6 @@ void setup(void) {
 
 void loop() {
 int soll_temp_tmp;
-//double vcc;
-//double v_in;
 
   CurMillis = millis();
   int actual_temperature = getTemperature();
@@ -371,7 +361,6 @@ int soll_temp_tmp;
   if ((CurMillis % READ_INTVAL) < 50) {
     if (read_voltage()) print_voltage();
   }
-  //if (volt_changed) print_voltage();
 
 	delay(DELAY_MAIN_LOOP);		//wait for some time
 }
@@ -399,8 +388,7 @@ void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
 
 	pwmVAL = map(pwmVAL, 0, 254, 0, 100);
 	
-	tft.setTextSize(1);
-  tft.setFont(&BIGFONT);
+	tft.setTextSize(5);
 
 	if (tempVAL_OLD != tempVAL){
 		int tempDIV = round(float(tempSOLL - tempVAL)*8.5);
@@ -429,50 +417,54 @@ void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
         #endif
       break;
     }
-		tft_print(tempVAL_OLD, tempVAL, 60, 90, col);
+		tft_print(tempVAL_OLD, tempVAL, 30, 57, col);
 		tempVAL_OLD = tempVAL;
 	}
 	
 	if ((tempSOLL_OLD+d_tempSOLL < tempSOLL) || (tempSOLL_OLD-d_tempSOLL > tempSOLL)){
-    tft_print(tempSOLL_OLD, tempSOLL, 60, 135, ST7735_WHITE);
+    tft_print(tempSOLL_OLD, tempSOLL, 30, 102, ST7735_WHITE);
 		tempSOLL_OLD = tempSOLL;
 	}
 
 	if (pwmVAL_OLD != pwmVAL){
     drawPWMBar(pwmVAL);
-    //tft.setCursor(79,144);
-    //tft.setTextColor(ST7735_WHITE); 
-/*    
-    const char * blanks2 = pwmVAL < 10 ? "  " : ((pwmVAL < 100) ? " " : "");
-    tft.print(blanks2);
-    tft.print(pwmVAL);
-    */
-   
-    //tft.setFont(&FreeSansBold9pt7b);
-    tft.setFont(&MEDFONT);
-    tft_print(pwmVAL_OLD, pwmVAL, 60, 156, ST7735_WHITE);
+    tft.setTextSize(2);
+    tft_print(pwmVAL_OLD, pwmVAL, 80, 144, ST7735_WHITE);
 
 		pwmVAL_OLD = pwmVAL;
 	}
-  tft.setFont();
 }
 
 // print formatted numbers on tft 
 void tft_print(int oldval, int newval, int x, int y, uint16_t col) {
-  int16_t  x1, y1;
-  uint16_t w, h;
-  char buf[3];
-  
   if (oldval != newval) {
-    itoa(oldval,buf,10);
-    tft.getTextBounds(buf, x, y, &x1, &y1, &w, &h);
-    tft.fillRect(119-w,y1,w+3,h,BACKGROUND);
+    tft.setCursor(x,y);
+    tft.setTextColor(BACKGROUND);
+    
+    if ((oldval/100) != (newval/100)) {
+      tft.print(oldval/100);
+    } else {
+      tft.print(" ");
+    }
+    if ((oldval/10)%10 != (newval/10)%10) {
+      tft.print((oldval/10)%10);
+    } else {
+      tft.print(" ");
+    }
+    if ((oldval%10) != (newval%10)) {
+      tft.print(oldval%10);
+    } 
+    
+    /*
+    //tft.print((oldval/100) != (newval/100) ? (char*)(oldval/100) : " ");
+    //tft.print(((oldval/10)%10) != ((newval/10)%10) ? (char*)((oldval/10)%10) : " ");
+    //tft.print((oldval%10) != (newval%10) ? (char*)(oldval%10) : " ");
+    */
   }
 
-  itoa(newval,buf,10);
-  tft.getTextBounds(buf, x, y, &x1, &y1, &w, &h);
-  tft.setCursor(119-w,y);
+  tft.setCursor(x,y);
   tft.setTextColor(col);
+  tft.print(newval < 10 ? "  " : (newval < 100) ? " " : "");
   tft.print(newval);
   
 #ifdef DEBUG
@@ -481,11 +473,6 @@ void tft_print(int oldval, int newval, int x, int y, uint16_t col) {
   Serial.print(F("x1: "));
   Serial.println(x1 );
 #endif  
-
-    //if (newval < 100) tft.print("  ");
-    //if (newval <  10) tft.print("  ");
-//    tft.setTextColor(col);
-//    tft.print(newval);
 }
 
 // display error/alert icon with short message
