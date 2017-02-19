@@ -43,7 +43,7 @@
 
 // comment in/out to (de)activate
 #define INTRO
-//#define DEBUG
+#define DEBUG
 #define HAVE_LED  // control a WS2812 RGB LED 
 #define HAVE_FAN  // fan connected to FAN_PIN
 #define HAVE_VOLT // measure Vin - needs voltage divider Vin<-22k->analog pin<-5.6k->GND (max. 25V with this config)
@@ -466,13 +466,7 @@ void tft_print(int oldval, int newval, int x, int y, uint16_t col) {
   tft.setTextColor(col);
   tft.print(newval < 10 ? "  " : (newval < 100) ? " " : "");
   tft.print(newval);
-  
-#ifdef DEBUG
-  Serial.print(F("w: "));
-  Serial.println(w);
-  Serial.print(F("x1: "));
-  Serial.println(x1 );
-#endif  
+ 
 }
 
 // display error/alert icon with short message
