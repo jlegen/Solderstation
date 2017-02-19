@@ -23,23 +23,23 @@
 
 #define __PROG_TYPES_COMPAT__ 
 #include <SPI.h>
-#include <TimerOne.h>
 #include <Adafruit_GFX.h>    // Core graphics library
 #include <Adafruit_ST7735.h> // Hardware-specific library
 #define BIGFONT FreeSansBold18pt7b
 #include <Fonts/FreeSansBold18pt7b.h>
-//#define BIGFONT FreeSans18pt7b
-//#include <Fonts/FreeSans18pt7b.h>
+#define MEDFONT FreeSans9pt7b
+#include <Fonts/FreeSans9pt7b.h>
 
 #include "icons.h"
 #include "stationLOGO.h"
 #define ST7735_GREY 0x632C
 #define BARCOLOR ST7735_MAGENTA
-#define BARHEIGHT 9
-#define PIXELS_X 128
-#define PIXELS_Y 160
+#define BARHEIGHT 8
+#define BACKGROUND ST7735_BLACK
 
 // experimenting with other displays
+#define PIXELS_X 128
+#define PIXELS_Y 160
 #define SCALE_X (PIXELS_X/128)
 #define SCALE_Y (PIXELS_Y/160)
 
@@ -73,7 +73,8 @@
 
 #ifdef HAVE_VOLT
  #define VCCpin A6  //Voltage divider pin for Vin
- volatile double v_in;
+// volatile double v_in;
+ double v_in = 0.0;
 #endif
 
 #define tft_bl   7  // TFT Backlight
@@ -87,7 +88,7 @@
 #define PWMpin 	3
 
 #define CNTRL_GAIN      10 // default is 10
-#define DELAY_MAIN_LOOP 10 // default is 10
+#define DELAY_MAIN_LOOP 0 // default is 10
 #define DELAY_MEASURE 	50 // default is 50
 #define ADC_TO_TEMP_GAIN 	0.53 // mit original Weller Station verglichen
 #define ADC_TO_TEMP_OFFSET 13.0 
@@ -116,15 +117,8 @@ int val_poti = 0;
 int LastPercent = 0;
 unsigned long StbyMillis = 0;
 unsigned long CurMillis;
-//double vcc_last=0;
 bool is_error = false;
-volatile double vcc;
-volatile bool volt_changed = true;
-
-void timerIsr()
-{
-  read_voltage(); //read analog pin(s)
-}
+double vcc = 0.0;
 
 void setup(void) {
 #ifdef DEBUG
@@ -183,8 +177,8 @@ void setup(void) {
 	
 #ifdef INTRO
   tft.fillScreen(ST7735_GREEN);
-  tft.drawBitmap(0,0,splash,128,149,ST7735_BLACK);
-  tft.fillRect(0,149,128,11,ST7735_BLACK); // image lacks some y width...
+  tft.drawBitmap(0,0,splash,128,149,BACKGROUND);
+  tft.fillRect(0,149,128,11,BACKGROUND); // image lacks some y width...
 	tft.setTextSize(1);
 	tft.setTextColor(ST7735_YELLOW);
 	tft.setCursor(40,50);
@@ -203,7 +197,7 @@ void setup(void) {
 #endif
 
   //Print station Logo
-  tft.fillScreen(ST7735_BLACK);
+  tft.fillScreen(BACKGROUND);
   tft.drawBitmap(2,1,stationLOGO1,124,47,ST7735_GREY);
   tft.drawBitmap(3,3,stationLOGO1,124,47,ST7735_YELLOW);    
   tft.drawBitmap(3,3,stationLOGO2,124,47,tft.Color565(254,147,52)); 
@@ -214,7 +208,7 @@ void setup(void) {
   digitalWrite(tft_bl, HIGH);
 #endif
   
-	//tft.fillRect(0,47,128,125,ST7735_BLACK);
+	//tft.fillRect(0,47,128,125,BACKGROUND);
 
   tft.setTextSize(1);
   tft.setTextColor(ST7735_YELLOW);
@@ -222,6 +216,7 @@ void setup(void) {
   tft.print("v");
   tft.print(VERSION);
 
+	//tft.setFont(&FreeSansBold9pt7b);
 	tft.setTextColor(ST7735_WHITE);
 
 	tft.setCursor(1,84);
@@ -234,13 +229,16 @@ void setup(void) {
   tft.print("PWM");
 
   
-  tft.setCursor(122,57);
+  //tft.setFont();
+  tft.setCursor(122,58);
   tft.print("O");
-  tft.setCursor(122,103);
+  tft.setCursor(122,104);
   tft.print("O");
+  tft.setCursor(122,145);
+  tft.print("%");
 
-  Timer1.initialize(1000000); // 1000000 = 1sec
-  Timer1.attachInterrupt(timerIsr); 
+  //Timer1.initialize(1000000); // 1000000 = 1sec
+  //Timer1.attachInterrupt(timerIsr); 
 
 /*
   
@@ -274,7 +272,7 @@ int soll_temp_tmp;
             Serial.println(F("FAN on."));
          #endif
       #endif
-      tft.fillRect(5, 57 , 20, 22, ST7735_BLACK); // erase icon
+      tft.fillRect(5, 57 , 20, 22, BACKGROUND); // erase icon
     }
   } else {
     if (op_state == OP_NORMAL || op_state == -1) {
@@ -295,7 +293,7 @@ int soll_temp_tmp;
            Serial.println(F("FAN off."));
         #endif
      #endif
-     tft.fillRect(5, 57 , 20, 22, ST7735_BLACK);
+     tft.fillRect(5, 57 , 20, 22, BACKGROUND);
      tft.drawBitmap(5,57,shut_icon,20,22,ST7735_BLUE); 
     }
   }
@@ -351,7 +349,7 @@ int soll_temp_tmp;
 	pwm = pwm > MAX_PWM ? pwm = MAX_PWM : pwm < 0 ? pwm = 0 : pwm;
 	
   // tip removed?
-	if (actual_temperature > 550){
+	if (actual_temperature > 540){
 		pwm = 0;
 		actual_temperature = 0;
     if (!is_error) tft_message("Tip!", true);
@@ -370,9 +368,12 @@ int soll_temp_tmp;
 	FastLED.show();
 #endif
 
-  if (volt_changed) print_voltage();
+  if ((CurMillis % READ_INTVAL) < 50) {
+    if (read_voltage()) print_voltage();
+  }
+  //if (volt_changed) print_voltage();
 
-	//delay(DELAY_MAIN_LOOP);		//wait for some time
+	delay(DELAY_MAIN_LOOP);		//wait for some time
 }
 
 
@@ -394,6 +395,7 @@ void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
 	static int tempSOLL_OLD = 	10;
 	static int tempVAL_OLD	= 	10;
 	static int pwmVAL_OLD	= 	10;
+  static int col;
 
 	pwmVAL = map(pwmVAL, 0, 254, 0, 100);
 	
@@ -401,108 +403,89 @@ void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
   tft.setFont(&BIGFONT);
 
 	if (tempVAL_OLD != tempVAL){
-		//tft.setCursor(30,57);
-    //tft.setCursor(65,90);
-    tft_erase(tempVAL_OLD, tempVAL,55,90);
-		
 		int tempDIV = round(float(tempSOLL - tempVAL)*8.5);
 		tempDIV = tempDIV > 254 ? tempDIV = 254 : tempDIV < 0 ? tempDIV = 0 : tempDIV;
 
     switch (op_state) {
       case OP_NORMAL:
         tft.setTextColor(tft.Color565(tempDIV, 255-tempDIV, 0));
+        col = tft.Color565(tempDIV, 255-tempDIV, 0);
         #ifdef HAVE_LED
           fill_solid( leds, NUM_LEDS, CRGB( tempDIV, 255-tempDIV, 0) );
         #endif
       break;
       case OP_STANDBY:
         tft.setTextColor(ST7735_CYAN);
+        col = ST7735_CYAN;
         #ifdef HAVE_LED
           fill_solid( leds, NUM_LEDS, CRGB::Cyan );
         #endif
       break;
       case OP_SHUTDOWN:
         tft.setTextColor(ST7735_BLUE);
+        col = ST7735_BLUE;
         #ifdef HAVE_LED
           fill_solid( leds, NUM_LEDS, CRGB::Blue );
         #endif
       break;
     }
-    //tft.setCursor(30,57);
-    //tft.setCursor(65,90);
-		tft_print(tempVAL, 65, 90);
+		tft_print(tempVAL_OLD, tempVAL, 60, 90, col);
 		tempVAL_OLD = tempVAL;
 	}
 	
 	if ((tempSOLL_OLD+d_tempSOLL < tempSOLL) || (tempSOLL_OLD-d_tempSOLL > tempSOLL)){
-		//tft.setCursor(30,102);
-//    tft.setCursor(65,135);
-    tft_erase(tempSOLL_OLD, tempSOLL,55,135);
-    //tft.setCursor(30,102);
-		tft.setTextColor(ST7735_WHITE);
-    //tft.setCursor(65,135);
-    tft_print(tempSOLL, 65, 135);
+    tft_print(tempSOLL_OLD, tempSOLL, 60, 135, ST7735_WHITE);
 		tempSOLL_OLD = tempSOLL;
 	}
 
-	tft.setFont();
 	if (pwmVAL_OLD != pwmVAL){
-    tft.setTextSize(2);
-		//tft.setCursor(79,144);
-    tft_erase(pwmVAL_OLD, pwmVAL,79,144);
     drawPWMBar(pwmVAL);
-    tft.setCursor(79,144);
-    tft.setTextColor(ST7735_WHITE); 
-    //tft_print(pwmVAL, 79, 144);
-    const char * blanks = pwmVAL < 10 ? "  " : ((pwmVAL < 100) ? " " : "");
-    tft.print(blanks);
+    //tft.setCursor(79,144);
+    //tft.setTextColor(ST7735_WHITE); 
+/*    
+    const char * blanks2 = pwmVAL < 10 ? "  " : ((pwmVAL < 100) ? " " : "");
+    tft.print(blanks2);
     tft.print(pwmVAL);
-    tft.print("%");
+    */
+   
+    //tft.setFont(&FreeSansBold9pt7b);
+    tft.setFont(&MEDFONT);
+    tft_print(pwmVAL_OLD, pwmVAL, 60, 156, ST7735_WHITE);
+
 		pwmVAL_OLD = pwmVAL;
 	}
-}
-
-// clear tft numbers only when changed
-void tft_erase(int oldval, int newval, int x, int y) {
-  int16_t  x1, y1;
-  uint16_t w, h;
-  char buf[3];
-  if (oldval != newval) {
-    tft.setCursor(x,y);
-    itoa(oldval,buf,10);
-    //Serial.println(buf);
-    tft.getTextBounds(buf, x, y, &x1, &y1, &w, &h);
-    tft.fillRect(x1,y1,71,h,ST7735_BLACK);
-  }
-  
-  //tft.setTextColor(ST7735_BLACK);
-/*  
-  if ((oldval/100) != (newval/100)) {
-    //tft.getTextBounds((char*)(oldval/100), x, y, &x1, &y1, &w, &h);
-    //tft.fillRect(x1,y1,w,h,ST7735_BLACK);
-    tft.print(oldval/100);
-  } else {
-    tft.print(" ");
-  }
-  if ( ((oldval/10)%10) != ((newval/10)%10)) {
-    //tft.getTextBounds((char*)(oldval/10), x, y, &x1, &y1, &w, &h);
-    //tft.fillRect(x1,y1,w,h,ST7735_BLACK);
-    tft.print((oldval/10)%10 );
-  } else {
-    tft.print(" ");
-  }
-  if ( (oldval%10) != (newval%10)) tft.print(oldval%10);
-  //tft.getTextBounds((char*)(oldval%10), x, y, &x1, &y1, &w, &h);
-  //tft.fillRect(x1,y1,w,h,ST7735_BLACK);
-*/  
+  tft.setFont();
 }
 
 // print formatted numbers on tft 
-void tft_print(int val, int x, int y) {
-    tft.setCursor(x,y);
-    if (val < 100) tft.print("  ");
-    if (val <  10) tft.print("  ");
-    tft.print(val);
+void tft_print(int oldval, int newval, int x, int y, uint16_t col) {
+  int16_t  x1, y1;
+  uint16_t w, h;
+  char buf[3];
+  
+  if (oldval != newval) {
+    itoa(oldval,buf,10);
+    tft.getTextBounds(buf, x, y, &x1, &y1, &w, &h);
+    tft.fillRect(119-w,y1,w+3,h,BACKGROUND);
+  }
+
+  itoa(newval,buf,10);
+  tft.getTextBounds(buf, x, y, &x1, &y1, &w, &h);
+  tft.setCursor(119-w,y);
+  tft.setTextColor(col);
+  tft.print(newval);
+  
+#ifdef DEBUG
+  Serial.print(F("w: "));
+  Serial.println(w);
+  Serial.print(F("x1: "));
+  Serial.println(x1 );
+#endif  
+
+    //if (newval < 100) tft.print("  ");
+    //if (newval <  10) tft.print("  ");
+//    tft.setTextColor(col);
+//    tft.print(newval);
 }
 
 // display error/alert icon with short message
@@ -512,8 +495,8 @@ void tft_message(char* msg, bool dowrite) {
     tft.drawBitmap(26, 56, alert_icon, 20, 20, tft.Color565(255,0,90)); 
     tft.setTextColor(ST7735_RED);
   } else {
-    tft.fillRect(26,56,20,20,ST7735_BLACK);
-    tft.setTextColor(ST7735_BLACK,ST7735_BLACK);
+    tft.fillRect(26,56,20,20,BACKGROUND);
+    tft.setTextColor(BACKGROUND,BACKGROUND);
   }
   tft.setTextSize(1);
   tft.setCursor(48,55);
@@ -524,7 +507,7 @@ void tft_message(char* msg, bool dowrite) {
 void drawPWMBar (int nPer){
   if(nPer < LastPercent){
     // erase only diff bar
-    tft.fillRect(20 + nPer , PIXELS_Y - BARHEIGHT - 2 , LastPercent - nPer, BARHEIGHT, ST7735_BLACK); //x,y,width,height,color
+    tft.fillRect(20 + nPer , PIXELS_Y - BARHEIGHT - 2 , LastPercent - nPer, BARHEIGHT, BACKGROUND); //x,y,width,height,color
   }
   else{
     tft.fillRect(20 , PIXELS_Y - BARHEIGHT - 2, nPer, BARHEIGHT, BARCOLOR);
@@ -600,52 +583,45 @@ double readVcc() {
 }
 
 void print_voltage() {
-  //double vcc;
-  //vcc = readVcc();
-  volt_changed = false;
   tft.setTextSize(1);
-  tft.fillRect(50,1,18,8,ST7735_BLACK);
+  tft.fillRect(50,1,18,8,BACKGROUND);
   tft.setTextColor(ST7735_MAGENTA);
   tft.setCursor(30,1);
   tft.print("Vcc ");
-  //tft.setCursor(49,1);
-  //tft.print("   ");
   tft.setCursor(50,1);
   tft.print(vcc,1);
   tft.print("V");
   #ifdef DEBUG
-    Serial.print(F("*********************** Vcc printed: "));
+    Serial.print(F("*********************** Vcc: "));
     Serial.println(vcc,2);
   #endif
 
 #ifdef HAVE_VOLT
-  //double v_in;
-  //v_in = measureVoltage(); 
-  tft.fillRect(97,1,24,8,ST7735_BLACK);
-  //tft.setCursor(78,1);
-  //tft.print("   ");
+  tft.fillRect(97,1,24,8,BACKGROUND);
   tft.setCursor(78,1);
   tft.print("Vin ");
   tft.setCursor(97,1);
   tft.print(v_in,1);
   tft.print("V");
   #ifdef DEBUG
-    Serial.print(F("*********************** Vin printed: "));
+    Serial.print(F("*********************** Vin: "));
     Serial.println(v_in,2);
   #endif
 #endif
 }
 
 // ISR 
-void read_voltage() {
-  double last_val1 = vcc;
+bool read_voltage() {
+bool volt_changed;
+double last_val1 = vcc;
   vcc = readVcc();
-  volt_changed = (last_val1 != vcc);
+  volt_changed = ((int)(last_val1*10) != (int)(vcc*10)); // only check 1 decimal
 #ifdef HAVE_VOLT
   double last_val2 = v_in;
   v_in = measureVoltage();
-  volt_changed = volt_changed || (last_val2 != v_in);
+  volt_changed = volt_changed || ((int)(last_val2*10) != (int)(v_in*10));
 #endif
+  return volt_changed;
 }
 
 
