@@ -1,5 +1,6 @@
 //*******************************//
 // Soldering Station
+// https://github.com/jlegen/Solderstation
 // based on work from Matthias Wagner
 // https://debugginglab.wordpress.com/2014/10/30/soldering-station/
 // Modified by jleg99@gmail.com:
@@ -11,7 +12,7 @@
 
 // tested on Arduino Pro mini with standard boot loader
 // external libraries used are all available by using the IDE library mananger:
-// TimerOne, FastLED, Adafruit_GFX, Adafruit_ST7735
+// TimerOne, ClickEncoder, FastLED, Adafruit_GFX, Adafruit_ST7735
 
 // more Ideas:
 // - replace pot by rotary encoder 
@@ -21,7 +22,7 @@
 
 // D12: Standby=0V, 5V = normal  
 
-#define __PROG_TYPES_COMPAT__ 
+//#define __PROG_TYPES_COMPAT__ 
 #include <SPI.h>
 #include <EEPROM.h>
 #include <ClickEncoder.h>
@@ -36,20 +37,20 @@
 #define BARHEIGHT 8
 #define BACKGROUND ST7735_BLACK
 
-// experimenting with other displays
+// experimenting with other display sizes
 #define PIXELS_X 128
 #define PIXELS_Y 160
 #define SCALE_X (PIXELS_X/128)
 #define SCALE_Y (PIXELS_Y/160)
 
-#define VERSION "1.8"
+#define VERSION "2.0"
 
 // comment in/out to (de)activate
-#define INTRO
 //#define DEBUG
+#define INTRO
 #define HAVE_LED  // control a WS2812 RGB LED 
 #define HAVE_FAN  // fan connected to FAN_PIN
-#define HAVE_VOLT // measure Vin - needs voltage divider Vin<-22k->analog pin<-5.6k->GND (max. 25V with this config)
+#define HAVE_VOLT // also measure Vin - needs voltage divider: Vin <-22k-> VCCpin <-5.6k-> GND (max. 25V with this config)
 
 //
 // Pin assignments
@@ -99,7 +100,7 @@
 #define OVER_SHOT 			2
 #define MAX_PWM_LOW			180
 #define MAX_PWM_HI			210		//254
-#define MAX_POTI				400		//400Grad C
+#define MAX_TEMP				400		//400Grad C
 
 #define r_button 17                //rotary encoder pushbutton, PB1
 #define r_pha 16                   //rotary encoder phase A, PB2
@@ -108,7 +109,7 @@
 #define PWM_DIV 1024						//default: 64   31250/64 = 2ms
 
 Adafruit_ST7735 tft = Adafruit_ST7735(tft_cs, tft_dc, tft_rst);
-ClickEncoder Encoder(r_pha, r_phb, r_button, 4); // 2,3,4 = clicks per step (notches)
+ClickEncoder Encoder(r_pha, r_phb, r_button, 1); // 2,3,4 = clicks per step (notches)
 
 
 // state machine: modes
@@ -120,7 +121,6 @@ int op_state = -1;
 
 int pwm = 0;             // pwm Out Val 0.. 255
 int soll_temp = 260;
-//int val_poti = 0;
 int LastPercent = 0;
 unsigned long StbyMillis = 0;
 unsigned long CurMillis;
@@ -129,7 +129,7 @@ bool is_error = false;
 double vcc = 0.0;
 int16_t encMovement;
 int16_t encAbsolute;
-int16_t encLastAbsolute = -1;
+//int16_t encLastAbsolute = -1;
 namespace State {  
   typedef enum SystemMode_e {
     None      = 0,
@@ -141,15 +141,13 @@ namespace State {
 
 uint8_t systemState = State::Default;
 uint8_t previousSystemState = State::None;
-bool updateMenu = false;
+//bool updateMenu = false;
 
 // define parameter's index
-#define STANDBYTEMP 0
-#define PRESETTEMP1 1
-#define PRESETTEMP2 2
-#define PRESETTEMP3 3
+#define STARTTEMP 0
+#define STANDBYTEMP 5
 #define SHUTDOWNTIME 4
-uint16_t params[5] = {150, 250, 300, 350, 300};
+uint16_t params[6] = {260, 250, 300, 350, 5, 150};
 #define MAX_PRESETS 3 // how many temp. presets to store
 uint8_t act_preset = 0;
 
@@ -158,22 +156,16 @@ void timerIsr()
   Encoder.service();
 }
 
-void write_to_eeprom(void) {
+void access_eeprom(bool do_write = false) {
 int i;
 uint16_t eeadr = EEPROM_ADDR;
 int len = sizeof(params) / sizeof(int16_t);
  for (i=0; i<len; i++) {
-   EEPROM.put(eeadr, params[i]);
-   eeadr += sizeof(int16_t);
- }
-}
-
-void read_from_eeprom(void) {
-int i;
-uint16_t eeadr = EEPROM_ADDR;
-int len = sizeof(params) / sizeof(int16_t);
- for (i=0; i<len; i++) {
-   EEPROM.get(eeadr, params[i]);
+   if (do_write) {
+    EEPROM.put(eeadr, params[i]);
+   } else {
+    EEPROM.get(eeadr, params[i]);
+   }
    eeadr += sizeof(int16_t);
  }
 }
@@ -234,17 +226,10 @@ void setup(void) {
   //Backlight on
   digitalWrite(tft_bl, HIGH);
 
-  ClickEncoder::Button b = Encoder.getButton();
+  ClickEncoder::Button b = Encoder.getButton(); // check button on startup - force write defaults to eeprom
   uint16_t eetest;
   EEPROM.get(EEPROM_ADDR, eetest);
-  if (eetest < 10 || eetest > 400 || (b != ClickEncoder::Open)) 
-  {
-    // write defaults to EEPROM
-    write_to_eeprom();
-  } else {
-    // load settings from EEPROM
-    read_from_eeprom();
-  } 
+  access_eeprom(eetest < 10 || eetest > 400 || (b != ClickEncoder::Open)); // read conf from eeprom, or write defaults
 
 #ifdef DEBUG
   Serial.begin(56700);
@@ -255,11 +240,11 @@ void setup(void) {
   Serial.print(F("EEProm Shutdown Time: "));
   Serial.println(params[SHUTDOWNTIME]);
   Serial.print(F("EEProm Prog Temp 1: "));
-  Serial.println(params[PRESETTEMP1]);
+  Serial.println(params[1]);
   Serial.print(F("EEProm Prog Temp 2: "));
-  Serial.println(params[PRESETTEMP2]);
+  Serial.println(params[2]);
   Serial.print(F("EEProm Prog Temp 3: "));
-  Serial.println(params[PRESETTEMP3]);
+  Serial.println(params[3]);
   Serial.print(F("Display scale factor X: "));
   Serial.println(SCALE_X);
   Serial.print(F("Display scale factor Y: "));
@@ -289,8 +274,6 @@ void setup(void) {
   digitalWrite(tft_bl, HIGH);
 #endif
   
-	//tft.fillRect(0,47,128,125,BACKGROUND);
-
   tft.setTextSize(1);
   tft.setTextColor(ST7735_YELLOW);
   tft.setCursor(1,46);
@@ -307,7 +290,6 @@ void setup(void) {
 
   tft.setCursor(1,151);
   tft.print("PWM");
-
   
   tft.setCursor(122,58);
   tft.print("O");
@@ -315,7 +297,6 @@ void setup(void) {
   tft.print("O");
   tft.setCursor(122,145);
   tft.print("%");
-
 }
 
 void loop() {
@@ -326,7 +307,7 @@ int soll_temp_tmp;
   // handle encoder
   encMovement = Encoder.getValue();
   if (encMovement) {
-    PrevMillis = CurMillis;  // INTERVAL time for showing data
+    //PrevMillis = CurMillis;  // INTERVAL time for showing data
     encAbsolute += encMovement;
     switch (systemState) {
       case State::Settings:
@@ -336,9 +317,9 @@ int soll_temp_tmp;
 
       // scroll through data to show
       case State::Default:
-       if (encMovement > 0 && soll_temp < MAX_POTI) soll_temp+=encMovement;
-       if (encMovement < 0 && soll_temp >  0) soll_temp += encMovement;
+       if ((encMovement > 0 && soll_temp < MAX_TEMP) || (encMovement < 0 && soll_temp >  0)) soll_temp += encMovement;
        if (soll_temp < 0) soll_temp = 0;
+       if (soll_temp > MAX_TEMP) soll_temp = MAX_TEMP;
        //update_screen(show_screen);
       break;
     }
@@ -359,9 +340,10 @@ int soll_temp_tmp;
           if (act_preset < MAX_PRESETS) {
             act_preset++;
           } else {
-            act_preset = 1;
+            act_preset = 0; // 0 = start/default preset
           }
           soll_temp = params[act_preset];
+          tft_show_preset(act_preset, false);
           break;
         
         // save value
@@ -370,8 +352,8 @@ int soll_temp_tmp;
           //write_to_eeprom();
           //Encoder.setAccelerationEnabled(false);
           //engine->navigate(&miSettings1);
-          systemState = State::Settings;
           previousSystemState = systemState;
+          systemState = State::Settings;
           //updateMenu = true;
           break;
       }
@@ -379,6 +361,7 @@ int soll_temp_tmp;
 
     case ClickEncoder::DoubleClicked:
       // menu: goto one level up
+      /*
       if (systemState == State::Settings) {
         //DEBUG_PRINTLN(F("Doubleclick in Settings"));
         //engine->navigate(engine->getParent());
@@ -391,58 +374,56 @@ int soll_temp_tmp;
         // Reset parameter to previous value
         //getItemValuePointer(engine->currentItem, &iValue);
         //*iValue = last_value;
-        systemState = State::Settings;
-        previousSystemState = systemState;
+        //previousSystemState = systemState;
+        //systemState = State::Settings;
         //engine->navigate(engine->currentItem);
         //updateMenu = true;
       }
+      */
       break;
 
     case ClickEncoder::Held:
+      params[act_preset] = soll_temp;
+      tft_show_preset(act_preset, true);
       // enter menu
-      if (systemState != State::Settings) {
+      /*if (systemState != State::Settings) {
         //Encoder.setAccelerationEnabled(false);
         //engine->navigate(&miSettings1);
-        systemState = State::Settings;
         previousSystemState = systemState;
+        systemState = State::Settings;
         //updateMenu = true;
       }
+      */
       break;
   }
   
   
   int actual_temperature = getTemperature();
 
-  if (digitalRead(STANDBYin) == true) {
+  if (digitalRead(STANDBYin) == true) { // tip not in stand
     if (op_state != OP_NORMAL) {
       op_state = OP_NORMAL;
       #ifdef HAVE_FAN
         digitalWrite(FAN_PIN, true);
          #ifdef DEBUG
-            Serial.println(F("FAN on."));
+            Serial.println(F("FAN switched on."));
          #endif
       #endif
       tft.fillRect(5, 57 , 20, 22, BACKGROUND); // erase icon
     }
-  } else {
+  } else {   // tip in stand
     if (op_state == OP_NORMAL || op_state == -1) {
      op_state = OP_STANDBY;
      #ifdef HAVE_FAN
         digitalWrite(FAN_PIN, false);
         #ifdef DEBUG
-           Serial.println(F("FAN off."));
+           Serial.println(F("FAN switched off."));
         #endif
      #endif
      StbyMillis = CurMillis; //start timer
      tft.drawBitmap(5,57,sb_icon,20,20,ST7735_GREEN);
-    } else if (op_state == OP_STANDBY && ((CurMillis - StbyMillis) >= (params[SHUTDOWNTIME]*1000))) {
+    } else if (op_state == OP_STANDBY && ((CurMillis - StbyMillis) >= (params[SHUTDOWNTIME] * 60L * 1000L))) {
      op_state = OP_SHUTDOWN;
-     #ifdef HAVE_FAN
-        digitalWrite(FAN_PIN, false);
-        #ifdef DEBUG
-           Serial.println(F("FAN off."));
-        #endif
-     #endif
      tft.fillRect(5, 57 , 20, 22, BACKGROUND);
      tft.drawBitmap(5,57,shut_icon,20,22,ST7735_BLUE); 
     }
@@ -540,7 +521,7 @@ int getTemperature()
 }
 
 void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
-	static int d_tempSOLL = 2;		//Tiefpass für Anzeige (Poti zittern)
+	static int d_tempSOLL = 0;		//Tiefpass für Anzeige (2 f. Potizittern)
 	static int tempSOLL_OLD = 	10;
 	static int tempVAL_OLD	= 	10;
 	static int pwmVAL_OLD	= 	10;
@@ -556,21 +537,18 @@ void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
 
     switch (op_state) {
       case OP_NORMAL:
-        tft.setTextColor(tft.Color565(tempDIV, 255-tempDIV, 0));
         col = tft.Color565(tempDIV, 255-tempDIV, 0);
         #ifdef HAVE_LED
           fill_solid( leds, NUM_LEDS, CRGB( tempDIV, 255-tempDIV, 0) );
         #endif
       break;
       case OP_STANDBY:
-        tft.setTextColor(ST7735_CYAN);
         col = ST7735_CYAN;
         #ifdef HAVE_LED
           fill_solid( leds, NUM_LEDS, CRGB::Cyan );
         #endif
       break;
       case OP_SHUTDOWN:
-        tft.setTextColor(ST7735_BLUE);
         col = ST7735_BLUE;
         #ifdef HAVE_LED
           fill_solid( leds, NUM_LEDS, CRGB::Blue );
@@ -595,12 +573,26 @@ void writeHEATING(int tempSOLL, int tempVAL, int pwmVAL){
 	}
 }
 
+// display current preset
+void tft_show_preset(uint8_t preset, bool new_preset) {
+  tft.setTextSize(2);
+  if (new_preset) {
+    tft.drawRect(4,101,13,17,BACKGROUND);
+    tft.drawChar(5,102,(char)preset+48, ST7735_MAGENTA, BACKGROUND, 2);
+    delay(200);
+    tft.drawChar(5,102,(char)preset+48,BACKGROUND, ST7735_MAGENTA, 2);
+    delay(200);
+    access_eeprom(true); // write changed values 
+  }
+  tft.drawRect(4,101,13,17,ST7735_MAGENTA);
+  tft.drawChar(5,102,(char)preset+48,BACKGROUND, ST7735_MAGENTA, 2); 
+}
+
 // print formatted numbers on tft 
 void tft_print(int oldval, int newval, int x, int y, uint16_t col) {
   if (oldval != newval) {
     tft.setCursor(x,y);
     tft.setTextColor(BACKGROUND);
-    
     if ((oldval/100) != (newval/100)) {
       tft.print(oldval/100);
     } else {
@@ -630,7 +622,6 @@ void tft_print(int oldval, int newval, int x, int y, uint16_t col) {
 
 // display error/alert icon with short message
 void tft_message(char* msg, bool dowrite) {
-  //tft.fillRect(10,60,108,40,ST7735_RED);
   if (dowrite) {
     tft.drawBitmap(26, 56, alert_icon, 20, 20, tft.Color565(255,0,90)); 
     tft.setTextColor(ST7735_RED);
@@ -691,9 +682,8 @@ void setPwmFrequency(int pin, int divisor) {
 #ifdef HAVE_VOLT
 double measureVoltage(void) {
 unsigned int ADCValue;
-  analogRead(VCCpin);
+  analogRead(VCCpin); // settle ADC
   ADCValue = analogRead(VCCpin);
-  //v_in = v_in*.9+(analogRead(VCCpin)*25/1024.0)*.1; //maximum measurable is ~24.5V
   return ADCValue * (25 / 1023.0); // range: max. 25V
 }
 #endif
@@ -750,10 +740,10 @@ void print_voltage() {
 #endif
 }
 
-// ISR 
+// read voltages 
 bool read_voltage() {
-bool volt_changed;
-double last_val1 = vcc;
+  bool volt_changed;
+  double last_val1 = vcc;
   vcc = readVcc();
   volt_changed = ((int)(last_val1*10) != (int)(vcc*10)); // only check 1 decimal
 #ifdef HAVE_VOLT
