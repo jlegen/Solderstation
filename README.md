@@ -1,4 +1,4 @@
-# Solderstation
+# Solderingstation using Weller RT
 Enhanced fork of the weller tip based solderstation from DebuggingLab
 based on work from Matthias Wagner
 https://debugginglab.wordpress.com/2014/10/30/soldering-station/
