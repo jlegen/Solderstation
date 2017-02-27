@@ -175,7 +175,7 @@ void setup(void) {
 
 #ifdef HAVE_LED
   FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
-	FastLED.setBrightness(BRIGHTNESS);
+  FastLED.setBrightness(BRIGHTNESS);
   fill_solid( leds, NUM_LEDS, CRGB::White );
 #endif
 
@@ -187,15 +187,15 @@ void setup(void) {
   pinMode(tft_rst,OUTPUT);
   digitalWrite(tft_rst, HIGH);
   
-	pinMode(tft_bl, OUTPUT);
-	digitalWrite(tft_bl, LOW);
+  pinMode(tft_bl, OUTPUT);
+  digitalWrite(tft_bl, LOW);
 	
-	pinMode(STANDBYin, INPUT_PULLUP);
+  pinMode(STANDBYin, INPUT_PULLUP);
 	
-	pinMode(PWMpin, OUTPUT);
-	digitalWrite(PWMpin, LOW);
-	setPwmFrequency(PWMpin, PWM_DIV);
-	digitalWrite(PWMpin, LOW);
+  pinMode(PWMpin, OUTPUT);
+  digitalWrite(PWMpin, LOW);
+  setPwmFrequency(PWMpin, PWM_DIV);
+  digitalWrite(PWMpin, LOW);
 	
   SPI.setClockDivider(SPI_CLOCK_DIV2);  // 8MHz
   
@@ -204,24 +204,24 @@ void setup(void) {
   Encoder.setAccelerationEnabled(true);
 
   tft.initR(INITR_BLACKTAB);
-	tft.setRotation(0);	// 0 - Portrait, 1 - Landscape
-	tft.setTextWrap(false);
+  tft.setRotation(0);	// 0 - Portrait, 1 - Landscape
+  tft.setTextWrap(false);
 	
 #ifdef INTRO
   tft.fillScreen(ST7735_GREEN);
   tft.drawBitmap(0,0,splash,128,149,BACKGROUND);
   tft.fillRect(0,149,128,11,BACKGROUND); // image lacks some y width...
-	tft.setTextSize(1);
-	tft.setTextColor(ST7735_YELLOW);
-	tft.setCursor(40,50);
-	tft.print("AVR");
+  tft.setTextSize(1);
+  tft.setTextColor(ST7735_YELLOW);
+  tft.setCursor(40,50);
+  tft.print("AVR");
   tft.setCursor(40,60);
-	tft.print("Soldering");
+  tft.print("Soldering");
   tft.setCursor(40,70);
-	tft.print("Station");
+  tft.print("Station");
   tft.setCursor(40,80);
   tft.print("V");
-	tft.print(VERSION);
+  tft.print(VERSION);
 	
   //Backlight on
   digitalWrite(tft_bl, HIGH);
@@ -280,10 +280,10 @@ void setup(void) {
   tft.print("v");
   tft.print(VERSION);
 
-	tft.setTextColor(ST7735_WHITE);
+  tft.setTextColor(ST7735_WHITE);
 
-	tft.setCursor(1,84);
-	tft.print("Temp");
+  tft.setCursor(1,84);
+  tft.print("Temp");
 
   tft.setCursor(1,129);
   tft.print("Set");
@@ -307,12 +307,9 @@ int soll_temp_tmp;
   // handle encoder
   encMovement = Encoder.getValue();
   if (encMovement) {
-    //PrevMillis = CurMillis;  // INTERVAL time for showing data
     encAbsolute += encMovement;
     switch (systemState) {
       case State::Settings:
-        //engine->navigate((encMovement > 0) ? engine->getNext() : engine->getPrev());
-        //updateMenu = true;
         break;
 
       // scroll through data to show
@@ -320,7 +317,6 @@ int soll_temp_tmp;
        if ((encMovement > 0 && soll_temp < MAX_TEMP) || (encMovement < 0 && soll_temp >  0)) soll_temp += encMovement;
        if (soll_temp < 0) soll_temp = 0;
        if (soll_temp > MAX_TEMP) soll_temp = MAX_TEMP;
-       //update_screen(show_screen);
       break;
     }
   }
@@ -329,10 +325,7 @@ int soll_temp_tmp;
   switch (Encoder.getButton()) {
     case ClickEncoder::Clicked:
       switch (systemState) {
-        // navigate menu structure
         case State::Settings:
-          //engine->invoke();
-          //updateMenu = true;
           break;
 
         // exit show data mode
@@ -348,52 +341,16 @@ int soll_temp_tmp;
         
         // save value
         case State::Edit:
-          //DEBUG_PRINTLN(F("Save changes!"));
-          //write_to_eeprom();
-          //Encoder.setAccelerationEnabled(false);
-          //engine->navigate(&miSettings1);
-          previousSystemState = systemState;
-          systemState = State::Settings;
-          //updateMenu = true;
           break;
       }
       break;
 
     case ClickEncoder::DoubleClicked:
-      // menu: goto one level up
-      /*
-      if (systemState == State::Settings) {
-        //DEBUG_PRINTLN(F("Doubleclick in Settings"));
-        //engine->navigate(engine->getParent());
-        //updateMenu = true;
-      }
-      // escaped from edit mode
-      if (systemState == State::Edit) {
-        //DEBUG_PRINTLN(F("Doubleclick in Edit"));
-        //Encoder.setAccelerationEnabled(false);
-        // Reset parameter to previous value
-        //getItemValuePointer(engine->currentItem, &iValue);
-        //*iValue = last_value;
-        //previousSystemState = systemState;
-        //systemState = State::Settings;
-        //engine->navigate(engine->currentItem);
-        //updateMenu = true;
-      }
-      */
       break;
 
     case ClickEncoder::Held:
       params[act_preset] = soll_temp;
       tft_show_preset(act_preset, true);
-      // enter menu
-      /*if (systemState != State::Settings) {
-        //Encoder.setAccelerationEnabled(false);
-        //engine->navigate(&miSettings1);
-        previousSystemState = systemState;
-        systemState = State::Settings;
-        //updateMenu = true;
-      }
-      */
       break;
   }
   
@@ -502,8 +459,7 @@ int soll_temp_tmp;
   if ((CurMillis % READ_INTVAL) < 50) {
     if (read_voltage()) print_voltage();
   }
-
-	delay(DELAY_MAIN_LOOP);		//wait for some time
+	delay(DELAY_MAIN_LOOP);		
 }
 
 
@@ -702,12 +658,9 @@ double readVcc() {
   delay(2);                        // Wait for Vref to settle
   ADCSRA |= _BV(ADSC);             // Start conversion
   while (bit_is_set(ADCSRA,ADSC)); // measuring
- 
   uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH  
   uint8_t high = ADCH; // unlocks both
- 
   long result = (high<<8) | low;
- 
   result = 1125300L / result; // Calculate Vcc (in mV); 1125300 = 1.1*1023*1000
   return result/1000.0;       // Vcc in volts
 }
